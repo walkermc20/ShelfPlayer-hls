@@ -5,8 +5,16 @@
 
 import Foundation
 
+public struct PlaybackSessionResponse: Sendable {
+    public let id: String
+    public let playMethod: Int?
+    public let audioTracks: [PlayableItem.AudioTrack]
+    public let chapters: [Chapter]
+    public let startTime: TimeInterval
+}
+
 public extension APIClient {
-    func startPlaybackSession(itemID: ItemIdentifier) async throws -> ([PlayableItem.AudioTrack], [Chapter], TimeInterval, String) {
+    func startPlaybackSession(itemID: ItemIdentifier) async throws -> PlaybackSessionResponse {
         var path = "api/items"
 
         if let groupingID = itemID.groupingID {
@@ -16,6 +24,10 @@ public extension APIClient {
         }
 
         let response = try await response(APIRequest<ItemPayload>(path: path, method: .post, body: [
+            "mediaPlayer": "ios-hls",
+            "forceTranscode": true,
+            "forceDirectPlay": false,
+            "supportedMimeTypes": [String](),
             "deviceInfo": [
                 "deviceId": ShelfPlayerKit.clientID,
                 "clientName": "ShelfPlayer",
@@ -23,23 +35,19 @@ public extension APIClient {
                 "manufacturer": "Apple",
                 "model": ShelfPlayerKit.model,
             ],
-            "supportedMimeTypes": [
-                "audio/flac",
-                "audio/mpeg",
-                "audio/mp4",
-                "audio/aac",
-                "audio/x-aiff",
-            ],
         ], maxAttempts: 2))
 
         guard let tracks = response.audioTracks, let chapters = response.chapters else {
             throw APIClientError.notFound
         }
 
-        let startTime = response.startTime ?? 0
-        let playbackSessionID = response.id
-
-        return (tracks.map { .init(track: $0, base: host) }, chapters.map(Chapter.init), startTime, playbackSessionID)
+        return PlaybackSessionResponse(
+            id: response.id,
+            playMethod: response.playMethod,
+            audioTracks: tracks.map { .init(track: $0, base: host) },
+            chapters: chapters.map(Chapter.init),
+            startTime: response.startTime ?? 0
+        )
     }
 
     func createListeningSession(itemID: ItemIdentifier, timeListened: TimeInterval, startTime: TimeInterval, currentTime: TimeInterval, started: Date, updated: Date) async throws {

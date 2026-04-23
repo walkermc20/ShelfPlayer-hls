@@ -41,6 +41,7 @@ struct ItemPayload: Codable, Sendable {
     let media: MediaPayload?
 
     let startTime: Double?
+    let playMethod: Int?
     let audioTracks: [AudiobookshelfAudioTrack]?
     let chapters: [ChapterPayload]?
 
@@ -72,6 +73,7 @@ struct ItemPayload: Codable, Sendable {
         self.imagePath = try container.decodeIfPresent(String.self, forKey: .imagePath)
         self.media = try container.decodeIfPresent(MediaPayload.self, forKey: .media)
         self.startTime = try container.decodeIfPresent(Double.self, forKey: .startTime)
+        self.playMethod = try container.decodeIfPresent(Int.self, forKey: .playMethod)
         self.audioTracks = try container.decodeIfPresent([AudiobookshelfAudioTrack].self, forKey: .audioTracks)
         self.chapters = try container.decodeIfPresent([ChapterPayload].self, forKey: .chapters)
         self.collapsedSeries = try container.decodeIfPresent(CollapsedSeriesPayload.self, forKey: .collapsedSeries)

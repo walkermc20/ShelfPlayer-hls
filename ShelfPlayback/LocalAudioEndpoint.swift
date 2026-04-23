@@ -480,9 +480,12 @@ private extension LocalAudioEndpoint {
                 throw AudioPlayerError.offline
             }
 
-            let suggestedStartTime: TimeInterval
-            (audioTracks, chapters, suggestedStartTime, sessionID) = try await ABSClient[currentItemID.connectionID].startPlaybackSession(itemID: currentItemID)
+            let session = try await ABSClient[currentItemID.connectionID].startPlaybackSession(itemID: currentItemID)
+            audioTracks = session.audioTracks
+            chapters = session.chapters
+            sessionID = session.id
 
+            let suggestedStartTime = session.startTime
             let entityCurrentTime = entity.isFinished ? 0 : entity.currentTime
             let delta = abs(entityCurrentTime - suggestedStartTime)
 
@@ -493,7 +496,7 @@ private extension LocalAudioEndpoint {
                 startTime = suggestedStartTime
             }
 
-            logger.info("Computed start time: \(startTime) (server suggested: \(suggestedStartTime), local entity: \(entityCurrentTime) | \(entity.progress) | \(entity.lastUpdate)")
+            logger.info("Computed start time: \(startTime) (server suggested: \(suggestedStartTime), local entity: \(entityCurrentTime) | \(entity.progress) | \(entity.lastUpdate), playMethod: \(session.playMethod ?? -1)")
 
             settings.openPlaybackSessions.append(OpenPlaybackSessionPayload(sessionID: sessionID!, itemID: currentItemID))
         } catch {
