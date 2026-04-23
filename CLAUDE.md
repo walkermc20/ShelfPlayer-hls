@@ -6,6 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ShelfPlayer is a native iOS app (Swift 6, iOS 26+) for listening to audiobooks and podcasts from self-hosted [Audiobookshelf](https://www.audiobookshelf.org/) servers. It uses SwiftUI, SwiftData, and AVFoundation.
 
+This fork is being used to prototype HLS playback against a modified Audiobookshelf server. The goal is a locally-deployed proof of concept to present upstream to `rasmuslos` — expect the architecture below to evolve as that work progresses.
+
+### Upstream contribution policy
+
+The upstream project's README explicitly asks contributors **not** to submit AI-generated pull requests. Instead, open an issue describing the idea and, if helpful, include the prompt used. Keep this in mind before proposing any upstream PR from this fork.
+
 ## Build & Run
 
 The project uses **XcodeGen** to generate the Xcode project from `project.yml`.
@@ -28,6 +34,7 @@ xcodebuild -scheme ShelfPlayer -configuration Debug -destination 'platform=iOS S
 
 - `ENABLE_CENTRALIZED` — enables features requiring a paid developer account (app groups, iCloud, Siri, CarPlay). Without it, the app uses `FREE_DEVELOPER_ACCOUNT.entitlements`.
 - Build number is auto-set from git commit count via a post-compile script.
+- `SWIFT_STRICT_CONCURRENCY: targeted` is set only for Debug in `project.yml`. Release/archive builds get Swift 6's default (full) strict concurrency, so concurrency warnings may appear only in archive builds.
 
 ## Architecture
 
@@ -49,10 +56,15 @@ ShelfPlayer (app)
 
 ### Key layers
 
-- **ShelfPlayerKit** (`/ShelfPlayerKit/`): Core framework. Contains REST API client (actor-based), SwiftData persistence with subsystem pattern (AuthorizationSubsystem, ProgressSubsystem, DownloadSubsystem, etc.), and data models. No SwiftUI dependency.
-- **ShelfPlayback** (`/ShelfPlayback/`): Audio playback engine (AudioPlayer), session management, progress reporting to server, Now Playing integration.
-- **App** (`/App/`): SwiftUI UI layer. Uses `@Observable` ViewModels. Key singletons: `Satellite` (navigation/UI coordinator), `PlaybackViewModel`, `ConnectionStore`.
+- **ShelfPlayerKit** (`/ShelfPlayerKit/`): Core framework. Contains REST API client (actor-based), SwiftData persistence with subsystem pattern (AuthorizationSubsystem, ProgressSubsystem, DownloadSubsystem, etc.), and data models. No SwiftUI dependency. Re-exports `RFVisuals` via `@_exported import`.
+- **ShelfPlayback** (`/ShelfPlayback/`): Audio playback engine (AudioPlayer), session management, progress reporting to server, Now Playing integration. Re-exports `ShelfPlayerKit` via `@_exported import` — so app files typically only need `import ShelfPlayback` to get both.
+- **ShelfPlayerMigration** (`/ShelfPlayerMigration/`): Version migration. `MigrationManager` orchestrates three dedicated migrators — `DefaultsMigrator` (UserDefaults keys), `KeychainMigrator` (credentials/tokens), and `SwiftDataMigrator` (store schema). New upgrade paths belong here, not inline in app/framework code.
+- **App** (`/App/`): SwiftUI UI layer. Uses `@Observable` ViewModels. Key singletons: `Satellite` (navigation/UI coordinator, in `App/Lifecycle/`), `PlaybackViewModel` (in `App/Playback/`), `ConnectionStore` (in `App/Connection/`, alongside `ConnectionManager`, `ConnectionAuthorizer`, and sign-in sheets).
 - **WidgetExtension** (`/WidgetExtension/`): Home screen and lock screen widgets sharing data via app group.
+
+### Embassy — Apple platform integration
+
+Both `App/Embassy/` and `ShelfPlayerKit/Embassy/` host the code that bridges ShelfPlayer with Apple platform features: App Intents, AppShortcuts, Siri, Spotlight indexing (`SpotlightIndexer`), CarPlay entities, `IntentAudioPlayer`, Live Activity attributes (`SleepTimerLiveActivityAttributes`), and `PlayMediaIntentHandler`. When adding Intents, Shortcuts, Spotlight behavior, or Live Activities, look here first — it's a distinct architectural slice that spans both the app target and the kit framework.
 
 ### Patterns
 
@@ -102,4 +114,4 @@ xcodebuild test -scheme ShelfPlayer -destination 'platform=iOS Simulator,name=iP
 
 ## Localization
 
-The app supports multiple languages. Localized strings are in `.xcstrings` files. See `Localization.md` for contributing translations.
+The app supports multiple languages. Localized strings are in `.xcstrings` files. Existing per-language `.lproj` folders under `App/` cover: `en`, `de`, `fr`, `nl`, `ru`, `sv`, `uk`, `zh-Hans`. See `Localization.md` for contributing translations.
