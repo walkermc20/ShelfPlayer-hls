@@ -102,6 +102,7 @@ struct SettingsView: View {
                 #endif
             }
             .navigationTitle("preferences")
+            .navigationBarTitleDisplayMode(.inline)
             .foregroundStyle(.primary)
             .navigationDestination(for: SettingsPage.self) { page in
                 switch page {
@@ -160,38 +161,23 @@ enum SettingsPage: Hashable {
 // MARK: - Header
 
 /// Hero header used at the top of every settings sub-page — a large rounded
-/// icon badge plus the page title, with an optional subtitle below for pages
-/// that benefit from extra context (e.g. Help).
+/// icon badge. The page title lives in the navigation bar.
 struct SettingsPageHeader: View {
     let title: LocalizedStringKey
     let systemImage: String
     let color: Color
-    var subtitle: LocalizedStringKey? = nil
 
     var body: some View {
         Section {
-            VStack(spacing: 16) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(color.gradient)
-                        .frame(width: 88, height: 88)
-                        .shadow(color: color.opacity(0.25), radius: 12, y: 4)
-                    Image(systemName: systemImage)
-                        .font(.system(size: 46, weight: .regular))
-                        .foregroundStyle(.white)
-                }
-
-                VStack(spacing: 6) {
-                    Text(title)
-                        .font(.title2.bold())
-
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                }
+            ZStack {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(color.gradient)
+                    .frame(width: 88, height: 88)
+                    .shadow(color: color.opacity(0.25), radius: 12, y: 4)
+                Image(systemName: systemImage)
+                    .font(.system(size: 46, weight: .regular))
+                    .foregroundStyle(.white)
+                    .accessibilityLabel(Text(title))
             }
             .frame(maxWidth: .infinity)
             .listRowBackground(Color.clear)
@@ -227,6 +213,7 @@ private struct GeneralSettingsView: View {
 
 private struct AppearanceSettingsView: View {
     @State private var activeTintColor: TintColor = AppSettings.shared.tintColor
+    @Bindable private var settings = AppSettings.shared
 
     var body: some View {
         List {
@@ -242,6 +229,10 @@ private struct AppearanceSettingsView: View {
                 ColorSchemePreference { title, icon in
                     Label(title, systemImage: icon)
                 }
+            }
+
+            Section {
+                Toggle("settings.animatedNowPlayingBackground", isOn: $settings.animatedNowPlayingBackground)
             }
         }
         .navigationTitle("settings.appearance")
@@ -375,6 +366,8 @@ private struct AdvancedSettingsView: View {
 private struct DebugSettingsView: View {
     @State private var general = [String: String]()
 
+    @AppStorage("io.rfk.shelfPlayer.debug.forceImagePlaceholder") private var forceImagePlaceholder = false
+
     var body: some View {
         List {
             Section {
@@ -383,11 +376,16 @@ private struct DebugSettingsView: View {
                 }
             }
 
+            Section("Rendering") {
+                Toggle("Force image placeholder", isOn: $forceImagePlaceholder)
+            }
+
             Button("Reconnect sockets") {
                 PersistenceManager.shared.webSocket.reconnect()
             }
         }
         .navigationTitle("settings.debug")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             general.removeAll()
 

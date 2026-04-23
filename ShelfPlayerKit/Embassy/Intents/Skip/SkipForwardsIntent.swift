@@ -7,12 +7,15 @@ import Foundation
 import AppIntents
 
 public struct SkipForwardsIntent: AudioPlaybackIntent {
-    public static let title: LocalizedStringResource = "intent.skip.forwards"
-    public static let description = IntentDescription("intent.skip.description")
+    public static let title: LocalizedStringResource = "intent.skipForwards.title"
+    public static let description = IntentDescription("intent.skipForwards.description")
 
     @AppDependency private var audioPlayer: IntentAudioPlayer
 
-    @Parameter(title: "intent.skip.interval", controlStyle: .field, inclusiveRange: (0, 108_000))
+    @Parameter(title: "intent.skipForwards.parameter.interval.title",
+               controlStyle: .field,
+               inclusiveRange: (0, 108_000),
+               requestValueDialog: IntentDialog("intent.skipForwards.parameter.interval.dialog"))
     public var interval: TimeInterval?
 
     public init() {}

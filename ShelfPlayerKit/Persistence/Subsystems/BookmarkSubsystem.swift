@@ -89,6 +89,35 @@ public extension PersistenceManager.BookmarkSubsystem {
             return Dictionary(try bookmarks(connectionID: libraryID.connectionID).map { ($0.primaryID, 1) }, uniquingKeysWith: +)
         }
     }
+    /// Count of all non-deleted bookmarks across every connection/library.
+    var totalCount: Int {
+        get throws {
+            try modelContext.fetch(FetchDescriptor<PersistedBookmark>()).filter { $0.status != .deleted }.count
+        }
+    }
+    /// Raw, library-agnostic bookmark record. Used for exports where the owning audiobook must be resolved on the fly.
+    struct ExportEntry: Sendable {
+        public let connectionID: ItemIdentifier.ConnectionID
+        public let primaryID: ItemIdentifier.PrimaryID
+        public let time: UInt64
+        public let note: String
+        public let created: Date
+    }
+    /// All non-deleted bookmarks across every connection/library, ordered oldest-first by creation date.
+    var all: [ExportEntry] {
+        get throws {
+            try modelContext.fetch(FetchDescriptor<PersistedBookmark>())
+                .filter { $0.status != .deleted }
+                .sorted { $0.created < $1.created }
+                .map {
+                    ExportEntry(connectionID: $0.connectionID,
+                                primaryID: $0.primaryID,
+                                time: $0.time,
+                                note: $0.note,
+                                created: $0.created)
+                }
+        }
+    }
     func note(at time: UInt64, for itemID: ItemIdentifier) async throws -> String {
         guard let note = try bookmark(connectionID: itemID.connectionID, primaryID: itemID.primaryID, time: time)?.note else {
             throw PersistenceError.missing

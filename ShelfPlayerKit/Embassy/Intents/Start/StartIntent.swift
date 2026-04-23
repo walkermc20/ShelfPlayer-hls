@@ -7,12 +7,15 @@ import Foundation
 import AppIntents
 
 public struct StartIntent: AudioPlaybackIntent {
-    public static let title: LocalizedStringResource = "intent.start"
+    public static let title: LocalizedStringResource = "intent.start.title"
     public static let description = IntentDescription("intent.start.description")
 
     @AppDependency private var audioPlayer: IntentAudioPlayer
 
-    @Parameter(title: "intent.entity.item", description: "intent.entity.item.description", optionsProvider: ItemEntityOptionsProvider())
+    @Parameter(title: "intent.start.parameter.item.title",
+               description: "intent.start.parameter.item.description",
+               requestValueDialog: IntentDialog("intent.start.parameter.item.dialog"),
+               optionsProvider: ItemEntityOptionsProvider())
     public var item: ItemEntity
 
     public init() {}

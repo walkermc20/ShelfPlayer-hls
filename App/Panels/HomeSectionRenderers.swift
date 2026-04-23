@@ -33,7 +33,8 @@ struct HomeRowContainer<Content: View>: View {
 // MARK: - Up Next
 
 struct UpNextRow: View {
-    let libraryID: LibraryIdentifier
+    /// When nil, aggregates across all libraries (pinned-tab "Any" semantics).
+    let libraryID: LibraryIdentifier?
     let title: String
 
     @State private var audiobooks: [Audiobook] = []
@@ -58,7 +59,10 @@ struct UpNextRow: View {
     }
 
     private func load() async {
-        let ids = AppSettings.shared.playbackResumeQueue.filter { $0.libraryID == libraryID.libraryID && $0.connectionID == libraryID.connectionID }
+        let ids = AppSettings.shared.playbackResumeQueue.filter { id in
+            guard let libraryID else { return true }
+            return id.libraryID == libraryID.libraryID && id.connectionID == libraryID.connectionID
+        }
         var resolvedBooks: [Audiobook] = []
         var resolvedEpisodes: [Episode] = []
 
@@ -78,7 +82,8 @@ struct UpNextRow: View {
 // MARK: - Listen Now
 
 struct ListenNowRow: View {
-    let libraryID: LibraryIdentifier
+    /// When nil, aggregates across all libraries (pinned-tab "Any" semantics).
+    let libraryID: LibraryIdentifier?
     let title: String
 
     @State private var audiobooks: [Audiobook] = []
@@ -103,7 +108,12 @@ struct ListenNowRow: View {
 
     private func load() async {
         guard let items = try? await PersistenceManager.shared.listenNow.current else { return }
-        let filtered = items.filter { $0.id.libraryID == libraryID.libraryID && $0.id.connectionID == libraryID.connectionID }
+        let filtered: [Item]
+        if let libraryID {
+            filtered = items.filter { $0.id.libraryID == libraryID.libraryID && $0.id.connectionID == libraryID.connectionID }
+        } else {
+            filtered = items
+        }
 
         withAnimation {
             audiobooks = filtered.compactMap { $0 as? Audiobook }
@@ -117,7 +127,8 @@ struct ListenNowRow: View {
 /// For each recently-played podcast in this library, shows the next unplayed
 /// episode. Podcasts are ordered by most recent progress update.
 struct NextUpPodcastsRow: View {
-    let libraryID: LibraryIdentifier
+    /// When nil, aggregates across all libraries (pinned-tab "Any" semantics).
+    let libraryID: LibraryIdentifier?
     let title: String
 
     @State private var episodes: [Episode] = []
@@ -141,27 +152,29 @@ struct NextUpPodcastsRow: View {
     private func load() async {
         guard let active = try? await PersistenceManager.shared.progress.activeProgressEntities else { return }
 
-        // Collect (podcastID, mostRecentLastUpdate) from progress of episodes in this connection.
-        var mostRecent: [String: Date] = [:]
+        // Collect (connectionID::groupingID, mostRecentLastUpdate) from progress of episodes.
+        var mostRecent: [String: (connectionID: String, groupingID: String, date: Date)] = [:]
         for entity in active {
-            guard entity.connectionID == libraryID.connectionID,
-                  let groupingID = entity.groupingID else { continue }
-            if let existing = mostRecent[groupingID] {
-                if entity.lastUpdate > existing { mostRecent[groupingID] = entity.lastUpdate }
+            if let libraryID, entity.connectionID != libraryID.connectionID { continue }
+            guard let groupingID = entity.groupingID else { continue }
+            let key = "\(entity.connectionID)::\(groupingID)"
+            if let existing = mostRecent[key] {
+                if entity.lastUpdate > existing.date {
+                    mostRecent[key] = (entity.connectionID, groupingID, entity.lastUpdate)
+                }
             } else {
-                mostRecent[groupingID] = entity.lastUpdate
+                mostRecent[key] = (entity.connectionID, groupingID, entity.lastUpdate)
             }
         }
 
-        let orderedPodcastIDs = mostRecent
-            .sorted { $0.value > $1.value }
+        let ordered = mostRecent.values
+            .sorted { $0.date > $1.date }
             .prefix(10)
-            .map(\.key)
 
         var next: [Episode] = []
-        for podcastID in orderedPodcastIDs {
-            guard let podcast = try? await ResolveCache.shared.resolve(primaryID: podcastID, connectionID: libraryID.connectionID) else { continue }
-            guard podcast.id.libraryID == libraryID.libraryID else { continue }
+        for entry in ordered {
+            guard let podcast = try? await ResolveCache.shared.resolve(primaryID: entry.groupingID, connectionID: entry.connectionID) else { continue }
+            if let libraryID, podcast.id.libraryID != libraryID.libraryID { continue }
             guard let item = try? await ResolveCache.nextGroupingItem(podcast.id), let episode = item as? Episode else { continue }
             next.append(episode)
         }
@@ -175,7 +188,8 @@ struct NextUpPodcastsRow: View {
 // MARK: - Downloaded
 
 struct DownloadedAudiobooksRow: View {
-    let libraryID: LibraryIdentifier
+    /// When nil, aggregates across all libraries (pinned-tab "Any" semantics).
+    let libraryID: LibraryIdentifier?
     let title: String
 
     @State private var audiobooks: [Audiobook] = []
@@ -190,19 +204,26 @@ struct DownloadedAudiobooksRow: View {
         }
         .task(id: libraryID) { await load() }
         .onReceive(PersistenceManager.shared.download.events.statusChanged) { payload in
-            if let (itemID, _) = payload, itemID.libraryID != libraryID.libraryID { return }
+            if let libraryID, let (itemID, _) = payload, itemID.libraryID != libraryID.libraryID { return }
             Task { await load() }
         }
     }
 
     private func load() async {
-        guard let books = try? await PersistenceManager.shared.download.audiobooks(in: libraryID.libraryID) else { return }
+        let books: [Audiobook]?
+        if let libraryID {
+            books = try? await PersistenceManager.shared.download.audiobooks(in: libraryID.libraryID)
+        } else {
+            books = try? await PersistenceManager.shared.download.audiobooks()
+        }
+        guard let books else { return }
         withAnimation { audiobooks = books }
     }
 }
 
 struct DownloadedEpisodesRow: View {
-    let libraryID: LibraryIdentifier
+    /// When nil, aggregates across all libraries (pinned-tab "Any" semantics).
+    let libraryID: LibraryIdentifier?
     let title: String
 
     @State private var episodes: [Episode] = []
@@ -219,13 +240,19 @@ struct DownloadedEpisodesRow: View {
         }
         .task(id: libraryID) { await load() }
         .onReceive(PersistenceManager.shared.download.events.statusChanged) { payload in
-            if let (itemID, _) = payload, itemID.libraryID != libraryID.libraryID { return }
+            if let libraryID, let (itemID, _) = payload, itemID.libraryID != libraryID.libraryID { return }
             Task { await load() }
         }
     }
 
     private func load() async {
-        guard let eps = try? await PersistenceManager.shared.download.episodes(in: libraryID.libraryID) else { return }
+        let eps: [Episode]?
+        if let libraryID {
+            eps = try? await PersistenceManager.shared.download.episodes(in: libraryID.libraryID)
+        } else {
+            eps = try? await PersistenceManager.shared.download.episodes()
+        }
+        guard let eps else { return }
         withAnimation { episodes = eps }
     }
 }
@@ -233,14 +260,15 @@ struct DownloadedEpisodesRow: View {
 // MARK: - Bookmarks
 
 struct BookmarksRow: View {
-    let libraryID: LibraryIdentifier
+    /// When nil, aggregates across all libraries (pinned-tab "Any" semantics).
+    let libraryID: LibraryIdentifier?
     let title: String
 
     @State private var count: Int = 0
 
     var body: some View {
         Group {
-            if libraryID.type == .audiobooks, count > 0 {
+            if let libraryID, libraryID.type == .audiobooks, count > 0 {
                 NavigationLink {
                     AudiobookBookmarksPanel()
                         .environment(\.library, Library(id: libraryID.libraryID, connectionID: libraryID.connectionID, name: title, type: libraryID.type, index: 0))
@@ -257,6 +285,15 @@ struct BookmarksRow: View {
                     }
                 }
                 .buttonStyle(.plain)
+            } else if libraryID == nil, count > 0 {
+                HomeRowContainer(title: title) {
+                    HStack {
+                        Text("home.section.bookmarks.count \(count)")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 20)
+                }
             } else {
                 EmptyView()
             }
@@ -265,9 +302,61 @@ struct BookmarksRow: View {
     }
 
     private func load() async {
-        guard libraryID.type == .audiobooks else { return }
-        guard let dict = try? await PersistenceManager.shared.bookmark[libraryID] else { return }
-        let total = dict.values.reduce(0, +)
-        withAnimation { count = total }
+        if let libraryID {
+            guard libraryID.type == .audiobooks else { return }
+            guard let dict = try? await PersistenceManager.shared.bookmark[libraryID] else { return }
+            let total = dict.values.reduce(0, +)
+            withAnimation { count = total }
+        } else {
+            guard let total = try? await PersistenceManager.shared.bookmark.totalCount else { return }
+            withAnimation { count = total }
+        }
+    }
+}
+
+// MARK: - Pinned Collection / Playlist
+
+/// Resolves a pinned `ItemCollection` (collection or playlist) and renders its
+/// items as a home row. If the collection fails to resolve (server removed it,
+/// connection offline) the row collapses to an EmptyView.
+///
+/// Important: this view does NOT wrap its content in a `NavigationLink`.
+/// `AudiobookRow` already contains its own `NavigationLink` (for the "see all"
+/// destination when there are >5 audiobooks), and nesting NavigationLinks
+/// triggers a collection-view recursive-layout loop (UICollectionView
+/// feedback-loop crash).
+struct PinnedCollectionRow: View {
+    let itemID: ItemIdentifier
+    /// Optional override title. When nil, the collection's own name is used.
+    let titleOverride: String?
+
+    @State private var collection: ItemCollection?
+
+    var body: some View {
+        Group {
+            if let collection {
+                let displayTitle = titleOverride ?? collection.name
+                if let audiobooks = collection.audiobooks, !audiobooks.isEmpty {
+                    AudiobookRow(title: displayTitle, small: false, audiobooks: audiobooks)
+                } else if let episodes = collection.episodes, !episodes.isEmpty {
+                    HomeRowContainer(title: displayTitle) {
+                        EpisodeGrid(episodes: episodes)
+                    }
+                } else {
+                    EmptyView()
+                }
+            } else {
+                EmptyView()
+            }
+        }
+        .task(id: itemID) { await load() }
+        .onReceive(CollectionEventSource.shared.changed) { _ in
+            Task { await load() }
+        }
+    }
+
+    private func load() async {
+        let resolved = try? await ResolveCache.shared.resolve(itemID) as? ItemCollection
+        withAnimation { collection = resolved }
     }
 }

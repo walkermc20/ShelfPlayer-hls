@@ -99,9 +99,10 @@ private extension AudiobookHomePanel {
     func reloadSections() async {
         guard let scope = effectiveScope else { return }
         let loaded = await PersistenceManager.shared.homeCustomization.sections(for: scope, libraryType: .audiobooks)
-        withAnimation {
-            sections = loaded
-        }
+        // No `withAnimation` here — animating a section-array change while a
+        // sheet transition or GeometryReader remeasure is in flight pushes
+        // UICollectionView into a feedback loop.
+        sections = loaded
     }
 
     func fetchItems(refresh: Bool = false) {
@@ -177,28 +178,26 @@ private struct AudiobookHomeSectionRow: View {
                 AudiobookRow(title: row.localizedLabel, small: false, audiobooks: row.entities)
             }
         case .listenNow:
-            if let libraryID = resolvedLibraryID {
-                ListenNowRow(libraryID: libraryID, title: section.kind.defaultLocalizedTitle)
-            }
+            ListenNowRow(libraryID: resolvedLibraryID, title: section.kind.defaultLocalizedTitle)
         case .upNext:
-            if let libraryID = resolvedLibraryID {
-                UpNextRow(libraryID: libraryID, title: section.kind.defaultLocalizedTitle)
-            }
+            UpNextRow(libraryID: resolvedLibraryID, title: section.kind.defaultLocalizedTitle)
         case .nextUpPodcasts:
-            if let libraryID = resolvedLibraryID, libraryID.type == .podcasts {
-                NextUpPodcastsRow(libraryID: libraryID, title: section.kind.defaultLocalizedTitle)
+            if resolvedLibraryID == nil || resolvedLibraryID?.type == .podcasts {
+                NextUpPodcastsRow(libraryID: resolvedLibraryID, title: section.kind.defaultLocalizedTitle)
             }
         case .downloadedAudiobooks:
-            if let libraryID = resolvedLibraryID, libraryID.type == .audiobooks {
-                DownloadedAudiobooksRow(libraryID: libraryID, title: section.kind.defaultLocalizedTitle)
+            if resolvedLibraryID == nil || resolvedLibraryID?.type == .audiobooks {
+                DownloadedAudiobooksRow(libraryID: resolvedLibraryID, title: section.kind.defaultLocalizedTitle)
             }
         case .downloadedEpisodes:
-            if let libraryID = resolvedLibraryID, libraryID.type == .podcasts {
-                DownloadedEpisodesRow(libraryID: libraryID, title: section.kind.defaultLocalizedTitle)
+            if resolvedLibraryID == nil || resolvedLibraryID?.type == .podcasts {
+                DownloadedEpisodesRow(libraryID: resolvedLibraryID, title: section.kind.defaultLocalizedTitle)
             }
         case .bookmarks:
-            if let libraryID = resolvedLibraryID {
-                BookmarksRow(libraryID: libraryID, title: section.kind.defaultLocalizedTitle)
+            BookmarksRow(libraryID: resolvedLibraryID, title: section.kind.defaultLocalizedTitle)
+        case .collection(let itemID), .playlist(let itemID):
+            if ItemIdentifier.isValid(itemID) {
+                PinnedCollectionRow(itemID: ItemIdentifier(string: itemID), titleOverride: nil)
             }
         }
     }

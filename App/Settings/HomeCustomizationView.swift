@@ -17,6 +17,8 @@ struct HomeCustomizationView: View {
 
     @State private var sections: [HomeSection] = []
     @State private var isLoading = true
+    @State private var collectionPickerType: ItemCollection.CollectionType?
+
     private var isPinnedScope: Bool {
         if case .pinned = scope { true } else { false }
     }
@@ -31,6 +33,16 @@ struct HomeCustomizationView: View {
 
         let present = Set(sections.map(\.kind.stableID))
         return all.filter { !present.contains($0.stableID) }
+    }
+
+    /// Collection types that can still be pinned. We always allow adding
+    /// more — a user may want multiple collection rows.
+    private var addableCollectionTypes: [ItemCollection.CollectionType] {
+        switch libraryType {
+        case .audiobooks: [.collection]
+        case .podcasts: [.playlist]
+        case nil: [.collection, .playlist]
+        }
     }
 
     var body: some View {
@@ -54,7 +66,7 @@ struct HomeCustomizationView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if !availableKindsToAdd.isEmpty {
+                if !availableKindsToAdd.isEmpty || !addableCollectionTypes.isEmpty {
                     Section {
                         ForEach(availableKindsToAdd, id: \.stableID) { kind in
                             HStack(spacing: 12) {
@@ -73,6 +85,26 @@ struct HomeCustomizationView: View {
                                 add(kind)
                             }
                         }
+
+                        ForEach(addableCollectionTypes, id: \.self) { type in
+                            HStack(spacing: 12) {
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundStyle(.white, .green)
+                                    .font(.title3)
+                                Image(systemName: type == .collection ? "rectangle.stack.fill" : "music.note.list")
+                                    .foregroundStyle(Color.accentColor)
+                                    .frame(width: 22)
+                                Text(type == .collection
+                                     ? String(localized: "home.customization.addCollection")
+                                     : String(localized: "home.customization.addPlaylist"))
+                                    .foregroundStyle(.primary)
+                                Spacer(minLength: 0)
+                            }
+                            .contentShape(.rect)
+                            .onTapGesture {
+                                collectionPickerType = type
+                            }
+                        }
                     } header: {
                         Text("home.customization.addSection")
                     }
@@ -82,7 +114,6 @@ struct HomeCustomizationView: View {
         .navigationTitle(isPinnedScope ? "home.customization.pinnedTitle" : "home.customization.title")
         .navigationBarTitleDisplayMode(.inline)
         .environment(\.editMode, .constant(.active))
-        .animation(.smooth, value: sections)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -96,7 +127,27 @@ struct HomeCustomizationView: View {
                 }
             }
         }
-        .onChange(of: sections) {
+        .sheet(item: $collectionPickerType) { type in
+            NavigationStack {
+                CollectionSectionPicker(type: type, libraryOverride: scope.implicitLibraryID) { itemID in
+                    // Dismiss the sheet first, then mutate state on the next
+                    // runloop turn. Mutating `sections` while the sheet is
+                    // still transitioning away triggers a simultaneous row
+                    // insertion in the underlying List, which reliably puts
+                    // UICollectionView into a recursive layout loop.
+                    collectionPickerType = nil
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(350))
+                        addCollection(type: type, itemID: itemID)
+                    }
+                }
+            }
+        }
+        // Persist whenever the pinned-scope library picker mutates a row's
+        // libraryID through the @Binding. Every other mutation (add / delete /
+        // move / reset) calls `persist()` directly, so we only need to react
+        // to the library-picker case here.
+        .onChange(of: sections.map(\.libraryID)) {
             guard !isLoading else { return }
             persist()
         }
@@ -107,14 +158,32 @@ struct HomeCustomizationView: View {
 
     private func add(_ kind: HomeSectionKind) {
         sections.append(.init(kind: kind, libraryID: scope.implicitLibraryID))
+        persist()
+    }
+
+    private func addCollection(type: ItemCollection.CollectionType, itemID: ItemIdentifier) {
+        let kind: HomeSectionKind = switch type {
+        case .collection: .collection(itemID: itemID.description)
+        case .playlist: .playlist(itemID: itemID.description)
+        }
+        // Don't add if the same collection is already pinned.
+        guard !sections.contains(where: { $0.kind.stableID == kind.stableID }) else { return }
+
+        let override: LibraryIdentifier? = isPinnedScope
+            ? LibraryIdentifier.convertItemIdentifierToLibraryIdentifier(itemID)
+            : scope.implicitLibraryID
+        sections.append(.init(kind: kind, libraryID: override))
+        persist()
     }
 
     private func moveSections(from source: IndexSet, to destination: Int) {
         sections.move(fromOffsets: source, toOffset: destination)
+        persist()
     }
 
     private func deleteSections(at indices: IndexSet) {
         sections.remove(atOffsets: indices)
+        persist()
     }
 
     private func load() async {
@@ -234,6 +303,147 @@ private struct HomeSectionLibraryPicker: View {
         }
         .navigationTitle("home.customization.libraryPicker.title")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Collection picker
+
+/// Lets the user pick one of their collections or playlists to pin as a home
+/// section. Enumerates libraries via `LibraryEnumerator` and lazy-loads the
+/// items of the chosen library when tapped.
+private struct CollectionSectionPicker: View {
+    let type: ItemCollection.CollectionType
+    /// When set (library-scope customization), the picker skips the library
+    /// enumerator and shows only this library's collections/playlists. When
+    /// nil (pinned-scope customization), the user picks a library first.
+    let libraryOverride: LibraryIdentifier?
+    let onPick: (ItemIdentifier) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Group {
+            if let libraryOverride, libraryOverride.type == expectedLibraryType {
+                // Library scope — go straight to this library's items. The
+                // caller dismisses the sheet via `collectionPickerType = nil`
+                // when `onPick` fires, so we don't dismiss here ourselves.
+                CollectionSectionPickerList(library: syntheticLibrary(from: libraryOverride), type: type, onPick: onPick)
+            } else if libraryOverride != nil {
+                // The scope's library is the wrong type for this collection kind.
+                // This shouldn't happen because the add-button row is filtered by
+                // library type, but render an explicit state rather than nothing.
+                EmptyCollectionView()
+                    .navigationTitle(navigationTitle)
+                    .navigationBarTitleDisplayMode(.inline)
+            } else {
+                List {
+                    LibraryEnumerator { name, content in
+                        Section(name) { content() }
+                    } label: { library in
+                        if library.id.type == expectedLibraryType {
+                            NavigationLink {
+                                CollectionSectionPickerList(library: library, type: type, onPick: onPick)
+                            } label: {
+                                Text(library.name)
+                                    .foregroundStyle(.primary)
+                            }
+                        }
+                    }
+                }
+                .navigationTitle(navigationTitle)
+                .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("action.cancel") { dismiss() }
+            }
+        }
+    }
+
+    private var navigationTitle: String {
+        type == .collection
+            ? String(localized: "home.customization.addCollection")
+            : String(localized: "home.customization.addPlaylist")
+    }
+
+    /// Collections live in audiobook libraries; playlists in podcast libraries
+    /// (per the server's enum mapping in `Library.swift`).
+    private var expectedLibraryType: LibraryMediaType {
+        switch type {
+        case .collection: .audiobooks
+        case .playlist: .podcasts
+        }
+    }
+
+    /// Build a minimal `Library` from a `LibraryIdentifier` so the lazy loader
+    /// can fetch. Only `id.connectionID` / `id.libraryID` are used downstream —
+    /// the placeholder name is never shown because the list's title uses the
+    /// add-collection/playlist label instead.
+    private func syntheticLibrary(from identifier: LibraryIdentifier) -> Library {
+        Library(id: identifier.libraryID,
+                connectionID: identifier.connectionID,
+                name: "",
+                type: identifier.type,
+                index: 0)
+    }
+}
+
+private struct CollectionSectionPickerList: View {
+    let library: Library
+    let type: ItemCollection.CollectionType
+    let onPick: (ItemIdentifier) -> Void
+
+    @State private var lazyLoader: LazyLoadHelper<ItemCollection, Void?>
+
+    init(library: Library, type: ItemCollection.CollectionType, onPick: @escaping (ItemIdentifier) -> Void) {
+        self.library = library
+        self.type = type
+        self.onPick = onPick
+        _lazyLoader = .init(initialValue: .collections(type))
+    }
+
+    var body: some View {
+        List {
+            if lazyLoader.items.isEmpty {
+                if lazyLoader.failed {
+                    ErrorView()
+                } else if lazyLoader.working {
+                    LoadingView()
+                } else {
+                    EmptyCollectionView()
+                }
+            } else {
+                ForEach(lazyLoader.items) { collection in
+                    Button {
+                        onPick(collection.id)
+                    } label: {
+                        HStack {
+                            Text(collection.name)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .onAppear {
+                        lazyLoader.performLoadIfRequired(collection)
+                    }
+                }
+            }
+        }
+        .navigationTitle(library.name.isEmpty
+                         ? (type == .collection
+                            ? String(localized: "home.customization.addCollection")
+                            : String(localized: "home.customization.addPlaylist"))
+                         : library.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            lazyLoader.library = library
+            lazyLoader.initialLoad()
+        }
     }
 }
 
