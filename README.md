@@ -1,3 +1,16 @@
+# About this fork
+
+> [!IMPORTANT]
+> **This is an experimental fork** of [rasmuslos/ShelfPlayer](https://github.com/rasmuslos/ShelfPlayer), maintained by [@walkermc20](https://github.com/walkermc20).
+>
+> **Goal:** prototype **HLS playback and background downloads** in the iOS client against a modified Audiobookshelf server ([walkermc20/audiobookshelf](https://github.com/walkermc20/audiobookshelf)), as a proof of concept intended for eventual upstream discussion with the ShelfPlayer maintainer.
+>
+> **Status:** work in progress. Not production-ready. No App Store distribution. The App Store badge and sideloading links below point to upstream binaries — they do **not** include any changes made on this fork.
+>
+> **For reviewers / upstream:** architecture notes and the current implementation plan live in [`CLAUDE.md`](./CLAUDE.md). Feedback welcome via issues on this fork.
+
+---
+
 # ShelfPlayer
 
 **ShelfPlayer** is a powerful iOS application for listening to audiobooks and podcasts, designed for users with self-hosted [Audiobookshelf](https://www.audiobookshelf.org/) libraries. Built in **Swift 6** for **iOS 18+**, ShelfPlayer is fast, privacy-respecting, and deeply integrated with the Apple ecosystem.
