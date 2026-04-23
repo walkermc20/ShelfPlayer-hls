@@ -267,6 +267,8 @@ extension LocalAudioEndpoint {
     }
 
     func stop() async {
+        dumpPlaybackDiagnostics()
+
         await playbackReporter.finalize(currentTime: currentTime)
         await PersistenceManager.shared.download.removeBlock(from: currentItemID)
 
@@ -484,6 +486,13 @@ private extension LocalAudioEndpoint {
             audioTracks = session.audioTracks
             chapters = session.chapters
             sessionID = session.id
+
+            let looksLikeHLS = session.playMethod == 2 && session.audioTracks.count == 1
+            if looksLikeHLS, let manifest = session.audioTracks.first {
+                logger.info("HLS playback path engaged. manifest: \(manifest.resource.absoluteString, privacy: .public) (tracks=1, playMethod=2)")
+            } else {
+                logger.info("Progressive playback path engaged. tracks=\(session.audioTracks.count), playMethod=\(session.playMethod ?? -1)")
+            }
 
             let suggestedStartTime = session.startTime
             let entityCurrentTime = entity.isFinished ? 0 : entity.currentTime
@@ -760,6 +769,22 @@ private extension LocalAudioEndpoint {
             }
         }
         RunLoop.main.add(sleepTimeoutTimer!, forMode: .common)
+    }
+
+    func dumpPlaybackDiagnostics() {
+        guard let currentItem = audioPlayer.currentItem else {
+            return
+        }
+
+        if let accessLog = currentItem.accessLog(), let last = accessLog.events.last {
+            logger.info("AVPlayerItem access summary: playbackType=\(last.playbackType ?? "(none)", privacy: .public) server=\(last.serverAddress ?? "(none)", privacy: .public) stalls=\(last.numberOfStalls) bytes=\(last.numberOfBytesTransferred) indicatedBitrate=\(last.indicatedBitrate) observedBitrate=\(last.observedBitrate)")
+        }
+
+        if let errorLog = currentItem.errorLog() {
+            for event in errorLog.events {
+                logger.warning("AVPlayerItem error: status=\(event.errorStatusCode) domain=\(event.errorDomain ?? "(none)", privacy: .public) comment=\(event.errorComment ?? "(none)", privacy: .public) uri=\(event.uri ?? "(none)", privacy: .public)")
+            }
+        }
     }
 
     func repopulateAudioPlayerQueue(start index: Int) async throws {
