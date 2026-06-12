@@ -94,6 +94,13 @@ public final class AppSettings: @unchecked Sendable {
         didSet { suite.set(ultraHighQuality, forKey: "ultraHighQuality") }
     }
 
+    // Fork PoC: persistent HLS downloads via AVAssetDownloadURLSession.
+    // Requires a server with persistent HLS support; default off so stock
+    // behavior is unchanged.
+    public var enableHLSDownloads = false {
+        didSet { suite.set(enableHLSDownloads, forKey: "enableHLSDownloads") }
+    }
+
     // MARK: - In-App Settings
 
     public var playbackRates: [Double] = [0.9, 1, 1.3, 1.6, 2] {
@@ -340,6 +347,7 @@ public final class AppSettings: @unchecked Sendable {
         replaceVolumeWithTotalProgress = suite.object(forKey: "replaceVolumeWithTotalProgress") as? Bool ?? true
         allowCellularDownloads = suite.object(forKey: "allowCellularDownloads") as? Bool ?? false
         ultraHighQuality = suite.object(forKey: "ultraHighQuality") as? Bool ?? false
+        enableHLSDownloads = suite.object(forKey: "enableHLSDownloads") as? Bool ?? false
 
         if let val: [Double] = decodeCodable(forKey: "playbackRates") { playbackRates = val }
         defaultPlaybackRate = suite.object(forKey: "defaultPlaybackRate") as? Double ?? 1

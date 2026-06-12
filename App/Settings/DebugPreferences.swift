@@ -38,6 +38,8 @@ struct DebugPreferences: View {
                 cacheRefreshID += 1
             }
 
+            HLSPoCSection()
+
             Section {
                 if let spotlightIndexCompletionDate = settings.spotlightIndexCompletionDate {
                     Text("preferences.spotlightIndex \(spotlightIndexCompletionDate.formatted(.relative(presentation: .named)))")
@@ -68,6 +70,20 @@ struct DebugPreferences: View {
         }
         .task {
             downloadRunsInExtendedBackgroundTask = await PersistenceManager.shared.convenienceDownload.runsInExtendedBackgroundTask
+        }
+    }
+}
+
+private struct HLSPoCSection: View {
+    @Bindable private var settings = AppSettings.shared
+
+    var body: some View {
+        Section {
+            Toggle(isOn: $settings.enableHLSDownloads) {
+                Text(verbatim: "Persistent HLS downloads (fork PoC)")
+            }
+        } footer: {
+            Text(verbatim: "Requires an Audiobookshelf server with persistent HLS support. When enabled, HLS playback sessions are persisted in the background via AVAssetDownloadURLSession and replayed from disk.")
         }
     }
 }

@@ -111,6 +111,11 @@ final class LocalAudioEndpoint: AudioEndpoint {
 
     private var chapterValidUntil: TimeInterval?
 
+    // Fork PoC: when set, playback uses this single asset — an HLS manifest
+    // shared with an AVAssetDownloadTask (play-while-downloading) or a
+    // persisted .movpkg — instead of per-track assets.
+    private var sharedHLSAsset: AVURLAsset?
+
     private var audioPlayerSubscription: Any?
     private var observerSubscriptions = Set<AnyCancellable>()
     private var bufferCheckTimer: Timer?
@@ -471,6 +476,9 @@ private extension LocalAudioEndpoint {
 
         var audioTracks = [PlayableItem.AudioTrack]()
         var chapters = [Chapter]()
+        var hlsManifest: PlayableItem.AudioTrack?
+
+        sharedHLSAsset = nil
 
         let startTime: TimeInterval
         let sessionID: String?
@@ -489,6 +497,7 @@ private extension LocalAudioEndpoint {
 
             let looksLikeHLS = session.playMethod == 2 && session.audioTracks.count == 1
             if looksLikeHLS, let manifest = session.audioTracks.first {
+                hlsManifest = manifest
                 logger.info("HLS playback path engaged. manifest: \(manifest.resource.absoluteString, privacy: .public) (tracks=1, playMethod=2)")
             } else {
                 logger.info("Progressive playback path engaged. tracks=\(session.audioTracks.count), playMethod=\(session.playMethod ?? -1)")
@@ -530,6 +539,25 @@ private extension LocalAudioEndpoint {
             if downloadStatus == .completed {
                 audioTracks = try await PersistenceManager.shared.download.audioTracks(for: currentItemID)
                 chapters = await PersistenceManager.shared.download.chapters(itemID: currentItemID)
+            }
+
+            if AppSettings.shared.enableHLSDownloads {
+                if !HLSDownloadManager.shared.hasActiveDownload(for: currentItemID), let localAsset = HLSDownloadManager.shared.localAsset(for: currentItemID) {
+                    sharedHLSAsset = localAsset
+                    logger.info("Playing persisted HLS download for \(self.currentItemID, privacy: .public)")
+
+                    if audioTracks.isEmpty, let playable = try? await currentItemID.resolved as? PlayableItem {
+                        audioTracks = [.init(offset: 0, duration: playable.duration, resource: localAsset.url)]
+                    }
+                } else if let hlsManifest, let sessionID {
+                    let headers = (try? await ABSClient[currentItemID.connectionID].requestHeaders) ?? [:]
+                    let asset = HLSDownloadManager.shared.sharedAsset(manifestURL: hlsManifest.resource, headers: headers)
+
+                    sharedHLSAsset = asset
+
+                    let title = (try? await currentItemID.resolved)?.name ?? currentItemID.primaryID
+                    HLSDownloadManager.shared.startDownload(asset: asset, itemID: currentItemID, playbackSessionID: sessionID, title: title)
+                }
             }
 
             guard !audioTracks.isEmpty else {
@@ -789,6 +817,12 @@ private extension LocalAudioEndpoint {
 
     func repopulateAudioPlayerQueue(start index: Int) async throws {
         audioPlayer.removeAllItems()
+
+        if let sharedHLSAsset {
+            audioPlayer.insert(AVPlayerItem(asset: sharedHLSAsset), after: nil)
+            return
+        }
+
         let headers = try? await ABSClient[currentItemID.connectionID].requestHeaders
 
         guard !audioTracks.isEmpty else {

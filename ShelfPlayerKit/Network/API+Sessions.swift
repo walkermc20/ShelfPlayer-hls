@@ -125,4 +125,11 @@ public extension APIClient {
     func deleteSession(sessionID: String) async throws {
         let _ = try await response(APIRequest<EmptyResponse>(path: "api/session/\(sessionID)", method: .delete))
     }
+
+    /// Fork PoC: release server-side persistent HLS cache after a download
+    /// completes (or the item is removed). Session-independent and safe to
+    /// retry; returns 404 on servers without persistent HLS support.
+    func purgeHLSCache(sessionID: String) async throws {
+        let _ = try await response(APIRequest<EmptyResponse>(path: "api/session/\(sessionID)/hls-cache", method: .delete, maxAttempts: 3, bypassesOffline: true))
+    }
 }
